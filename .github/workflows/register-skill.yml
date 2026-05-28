@@ -1,0 +1,92 @@
+name: Register Skill
+
+on:
+  issues:
+    types:
+      - labeled
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  register-skill:
+    name: Verify and Register Skill
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'issues' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'register-skill') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == 'main')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      # 约定 Issue Body 或 Pull Request Body 为 JSON，且至少包含：
+      # {
+      #   "NFT_ID": "1",
+      #   "OWNER_ADDRESS": "0x...",
+      #   "MCP_SCHEMA_JSON": { ... } 或 "{...}"
+      # }
+      - name: Extract skill registration payload
+        id: payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body =
+              context.eventName === 'issues'
+                ? context.payload.issue?.body
+                : context.payload.pull_request?.body;
+
+            if (!body || !body.trim()) {
+              throw new Error('Issue / Pull Request 正文不能为空，且必须提供技能注册 JSON。');
+            }
+
+            let payload;
+            try {
+              payload = JSON.parse(body);
+            } catch (error) {
+              throw new Error(`Issue / Pull Request 正文不是合法 JSON: ${error.message}`);
+            }
+
+            const requiredFields = ['NFT_ID', 'OWNER_ADDRESS', 'MCP_SCHEMA_JSON'];
+            for (const field of requiredFields) {
+              if (!(field in payload) || payload[field] === null || payload[field] === '') {
+                throw new Error(`缺少必须字段: ${field}`);
+              }
+            }
+
+            core.setOutput('nft_id', String(payload.NFT_ID));
+            core.setOutput('owner_address', String(payload.OWNER_ADDRESS));
+            core.setOutput(
+              'mcp_schema_json',
+              typeof payload.MCP_SCHEMA_JSON === 'string'
+                ? payload.MCP_SCHEMA_JSON
+                : JSON.stringify(payload.MCP_SCHEMA_JSON)
+            );
+
+      - name: Verify owner and publish skill
+        env:
+          NFT_ID: ${{ steps.payload.outputs.nft_id }}
+          OWNER_ADDRESS: ${{ steps.payload.outputs.owner_address }}
+          MCP_SCHEMA_JSON: ${{ steps.payload.outputs.mcp_schema_json }}
+          RPC_URL: ${{ secrets.RPC_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          ERC8239_CONTRACT_ADDRESS: ${{ secrets.ERC8239_CONTRACT_ADDRESS }}
+        run: node ./scripts/verify-and-publish.mjs
