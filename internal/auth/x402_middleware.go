@@ -53,6 +53,7 @@ JOIN (
 ) authorized
 	ON authorized.tool_name = s.tool_name
 WHERE s.is_active = TRUE
+  AND s.sync_status = 'ready'
 `
 
 // toolRequestPayload 用于兼容直接请求体和 JSON-RPC 风格请求体中的 name 字段。

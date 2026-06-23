@@ -26,6 +26,7 @@ JOIN bundles b
   ON b.bundle_name = bs.bundle_name
  AND b.is_active = TRUE
 WHERE s.is_active = TRUE
+  AND s.sync_status = 'ready'
   AND s.tool_name = ANY($1)
 `
 
@@ -229,7 +230,7 @@ func buildKeywordFilterQuery(tokens []string, bundleName string, allowedToolName
 		builder.WriteString(" AS score ")
 	}
 
-	builder.WriteString("FROM skills s JOIN bundle_skills bs ON bs.tool_name = s.tool_name JOIN bundles b ON b.bundle_name = bs.bundle_name AND b.is_active = TRUE WHERE s.is_active = TRUE")
+	builder.WriteString("FROM skills s JOIN bundle_skills bs ON bs.tool_name = s.tool_name JOIN bundles b ON b.bundle_name = bs.bundle_name AND b.is_active = TRUE WHERE s.is_active = TRUE AND s.sync_status = 'ready'")
 
 	if bundleName != "" {
 		builder.WriteString(fmt.Sprintf(" AND b.subdomain = $%d", argumentIndex))

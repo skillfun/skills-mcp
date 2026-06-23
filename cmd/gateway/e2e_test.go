@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"skillfun-mcp/internal/auth"
+	bundlepkg "skillfun-mcp/internal/bundle"
 	"skillfun-mcp/internal/mcp"
 )
 
@@ -32,7 +33,12 @@ func TestEndToEndBundleCatalogFlowWithRealPostgres(t *testing.T) {
 	}
 
 	t.Setenv("BUNDLE_ADMIN_TOKEN", "secret-token")
-	gateway := httptest.NewServer(newEngine(db, mcp.NewSchemaAggregator(db)))
+	gateway := httptest.NewServer(newEngine(
+		db,
+		mcp.NewSchemaAggregator(db),
+		bundlepkg.NewStore(db, bundlepkg.WithSkillSyncer(stubSkillStorage{})),
+		stubSkillStorage{},
+	))
 	defer gateway.Close()
 
 	registerBundle(t, gateway.URL, "secret-token")
@@ -124,7 +130,7 @@ func registerBundle(t *testing.T, gatewayURL string, adminToken string) {
 	request, err := http.NewRequest(
 		http.MethodPost,
 		gatewayURL+"/v1/mcp/bundles",
-		bytes.NewBufferString(`{"bundleName":"weather","displayName":"Weather Bundle","description":"Weather tools","subdomain":"wx7abcde9f","skills":[{"nftId":1001,"name":"current","description":"Get current weather","inputSchema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}`),
+		bytes.NewBufferString(`{"bundleName":"weather","displayName":"Weather Bundle","description":"Weather tools","subdomain":"wx7abcde9f","skills":[{"nftId":1001,"name":"current","description":"Get current weather","inputSchema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"githubUrl":"https://github.com/example/weather-skill/tree/main/skills/current"}]}`),
 	)
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)

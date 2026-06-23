@@ -21,6 +21,7 @@ import (
 	"skillfun-mcp/internal/auth"
 	bundlepkg "skillfun-mcp/internal/bundle"
 	"skillfun-mcp/internal/mcp"
+	"skillfun-mcp/internal/skills"
 )
 
 const (
@@ -48,8 +49,14 @@ func main() {
 		log.Fatalf("初始化 PostgreSQL 表结构失败: %v", err)
 	}
 
+	skillStorage, err := skills.NewServiceFromEnv()
+	if err != nil {
+		log.Fatalf("初始化 skill 存储服务失败: %v", err)
+	}
+
 	aggregator := mcp.NewSchemaAggregator(db)
-	engine := newEngine(db, aggregator)
+	bundleStore := bundlepkg.NewStore(db, bundlepkg.WithSkillSyncer(skillStorage))
+	engine := newEngine(db, aggregator, bundleStore, skillStorage)
 
 	server := &http.Server{
 		Addr:              serverAddr,
@@ -83,9 +90,7 @@ func main() {
 	log.Println("网关已安全退出")
 }
 
-func newEngine(db *sql.DB, aggregator *mcp.SchemaAggregator) *gin.Engine {
-	bundleStore := bundlepkg.NewStore(db)
-
+func newEngine(db *sql.DB, aggregator *mcp.SchemaAggregator, bundleStore *bundlepkg.Store, skillStorage skills.Storage) *gin.Engine {
 	engine := gin.New()
 	engine.Use(
 		gin.Logger(),
@@ -147,9 +152,11 @@ func newEngine(db *sql.DB, aggregator *mcp.SchemaAggregator) *gin.Engine {
 
 	hostBundleRoutes := engine.Group("/", resolveBundleFromHost())
 	hostBundleRoutes.GET("/tools", handleToolsList(db, aggregator, ""))
+	hostBundleRoutes.POST("/mcp", handleBundleMCP(db, aggregator, bundleStore, skillStorage, ""))
 
 	pathBundleRoutes := engine.Group("/:bundleName", resolveBundleFromPath())
 	pathBundleRoutes.GET("/tools", handleToolsList(db, aggregator, ""))
+	pathBundleRoutes.POST("/mcp", handleBundleMCP(db, aggregator, bundleStore, skillStorage, ""))
 
 	adminBundles := engine.Group("/v1/mcp/bundles", auth.BundleAdminMiddleware(strings.TrimSpace(os.Getenv("BUNDLE_ADMIN_TOKEN"))))
 	adminBundles.POST("", handleUpsertBundle(bundleStore, true))
@@ -276,6 +283,7 @@ type bundleSkillRequest struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
+	GitHubURL   string          `json:"githubUrl"`
 }
 
 func handleUpsertBundle(bundleStore *bundlepkg.Store, isCreate bool) gin.HandlerFunc {
@@ -340,6 +348,11 @@ func handleUpsertBundle(bundleStore *bundlepkg.Store, isCreate bool) gin.Handler
 					"error":   "invalid_skill_payload",
 					"message": err.Error(),
 				})
+			case errors.Is(err, bundlepkg.ErrSkillSyncFailed):
+				c.JSON(http.StatusBadGateway, gin.H{
+					"error":   "sync_skill_failed",
+					"message": err.Error(),
+				})
 			case errors.Is(err, bundlepkg.ErrSkillAlreadyBundled):
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "skill_already_bundled",
@@ -370,6 +383,7 @@ func toManagedSkills(requestSkills []bundleSkillRequest) []bundlepkg.ManagedSkil
 			Name:        requestSkill.Name,
 			Description: requestSkill.Description,
 			InputSchema: requestSkill.InputSchema,
+			GitHubURL:   requestSkill.GitHubURL,
 		})
 	}
 
@@ -429,11 +443,25 @@ func ensureSchema(db *sql.DB) error {
 			tool_name TEXT NOT NULL,
 			upstream_url TEXT,
 			schema_json JSONB NOT NULL,
+			github_url TEXT,
+			skill_dir_name TEXT,
+			sync_status TEXT NOT NULL DEFAULT 'ready',
+			last_synced_at TIMESTAMPTZ,
+			sync_error TEXT,
 			is_active BOOLEAN NOT NULL DEFAULT TRUE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`ALTER TABLE skills ADD COLUMN IF NOT EXISTS upstream_url TEXT`,
+		`ALTER TABLE skills ADD COLUMN IF NOT EXISTS github_url TEXT`,
+		`ALTER TABLE skills ADD COLUMN IF NOT EXISTS skill_dir_name TEXT`,
+		`ALTER TABLE skills ADD COLUMN IF NOT EXISTS sync_status TEXT`,
+		`ALTER TABLE skills ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ`,
+		`ALTER TABLE skills ADD COLUMN IF NOT EXISTS sync_error TEXT`,
+		`UPDATE skills SET sync_status = 'ready' WHERE sync_status IS NULL OR TRIM(sync_status) = ''`,
+		`ALTER TABLE skills ALTER COLUMN sync_status SET DEFAULT 'ready'`,
+		`ALTER TABLE skills ALTER COLUMN sync_status SET NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS skills_skill_dir_name_key ON skills(skill_dir_name) WHERE skill_dir_name IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS skills_tool_name_key ON skills(tool_name)`,
 		`CREATE TABLE IF NOT EXISTS bundles (
 			bundle_name TEXT PRIMARY KEY,

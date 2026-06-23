@@ -12,3 +12,30 @@ type MCPTool struct {
 type ToolsListResponse struct {
 	Tools []MCPTool `json:"tools"`
 }
+
+// MCPResource 表示 MCP 资源列表中的单个资源。
+type MCPResource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	MimeType    string `json:"mimeType,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// ResourcesListResponse 表示 MCP resources/list 接口的返回结果。
+type ResourcesListResponse struct {
+	Resources []MCPResource `json:"resources"`
+}
+
+// MCPResourceContent 表示 resources/read 的单个内容项。
+type MCPResourceContent struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Blob     string `json:"blob,omitempty"`
+}
+
+// ResourcesReadResponse 表示 MCP resources/read 接口的返回结果。
+type ResourcesReadResponse struct {
+	Contents []MCPResourceContent `json:"contents"`
+}
