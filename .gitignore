@@ -1,0 +1,11 @@
+.DS_Store
+
+# Go build outputs
+/bin/
+/gateway
+*.test
+
+# Coverage artifacts
+*.coverprofile
+coverage.out
+cover.out
