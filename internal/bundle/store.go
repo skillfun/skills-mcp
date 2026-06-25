@@ -32,6 +32,11 @@ var (
 	ErrSkillSyncFailed     = errors.New("skill sync failed")
 )
 
+var (
+	marshalToolSchema = json.Marshal
+	readRandomBytes   = rand.Read
+)
+
 const (
 	minSubdomainLength       = 8
 	maxSubdomainLength       = 16
@@ -857,7 +862,7 @@ func marshalSkillSchema(skill ManagedSkillInput) ([]byte, error) {
 		return nil, fmt.Errorf("%w: invalid inputSchema for %s", ErrInvalidSkillPayload, skill.Name)
 	}
 
-	schemaJSON, err := json.Marshal(tool)
+	schemaJSON, err := marshalToolSchema(tool)
 	if err != nil {
 		return nil, fmt.Errorf("marshal managed skill schema: %w", err)
 	}
@@ -1105,7 +1110,7 @@ func generateUniqueSubdomain(ctx context.Context, tx *sql.Tx) (string, error) {
 func generateRandomSubdomain() (string, error) {
 	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 	randomBytes := make([]byte, autoSubdomainLength)
-	if _, err := rand.Read(randomBytes); err != nil {
+	if _, err := readRandomBytes(randomBytes); err != nil {
 		return "", fmt.Errorf("generate subdomain: %w", err)
 	}
 

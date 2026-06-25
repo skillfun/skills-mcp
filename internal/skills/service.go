@@ -32,6 +32,28 @@ var (
 	ErrPathEscape         = errors.New("resource path escapes skill root")
 )
 
+var (
+	resolveAbsPath        = filepath.Abs
+	parseRawURL           = url.Parse
+	createRequest         = http.NewRequestWithContext
+	createDirAll          = os.MkdirAll
+	createTempDir         = os.MkdirTemp
+	removePathAll         = os.RemoveAll
+	evalSymlinksPath      = filepath.EvalSymlinks
+	statPath              = os.Stat
+	relPath               = filepath.Rel
+	readPathFile          = os.ReadFile
+	openPathFile          = os.OpenFile
+	closePathFile         = func(file *os.File) error { return file.Close() }
+	renamePath            = os.Rename
+	lstatPath             = os.Lstat
+	createSymlink         = os.Symlink
+	resolveLinkedDir      = linkedDirectoryTarget
+	joinUnderRootPath     = safeJoinUnderRoot
+	unescapePathSegment   = url.PathUnescape
+	publishDirectory      = atomicReplaceDirectory
+)
+
 // Storage 定义 skill 文件同步与资源读取能力。
 type Storage interface {
 	Sync(ctx context.Context, githubURL string, skillDirName string) error
@@ -61,7 +83,7 @@ func NewService(root string) (*Service, error) {
 		return nil, fmt.Errorf("%s is required", StorageRootEnv)
 	}
 
-	absRoot, err := filepath.Abs(root)
+	absRoot, err := resolveAbsPath(root)
 	if err != nil {
 		return nil, fmt.Errorf("resolve skill storage root: %w", err)
 	}
@@ -86,7 +108,7 @@ func ParseGitHubURL(raw string) (GitHubSource, error) {
 		return GitHubSource{}, fmt.Errorf("%w: githubUrl is required", ErrInvalidGitHubURL)
 	}
 
-	parsed, err := url.Parse(raw)
+	parsed, err := parseRawURL(raw)
 	if err != nil {
 		return GitHubSource{}, fmt.Errorf("%w: parse githubUrl: %v", ErrInvalidGitHubURL, err)
 	}
@@ -153,23 +175,23 @@ func (s *Service) Sync(ctx context.Context, githubURL string, skillDirName strin
 		return err
 	}
 
-	if err := os.MkdirAll(s.root, 0o755); err != nil {
+	if err := createDirAll(s.root, 0o755); err != nil {
 		return fmt.Errorf("create skill storage root: %w", err)
 	}
 
-	tempParentDir, err := os.MkdirTemp(s.root, skillDirName+".tmp-*")
+	tempParentDir, err := createTempDir(s.root, skillDirName+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp skill directory: %w", err)
 	}
-	defer os.RemoveAll(tempParentDir)
+	defer removePathAll(tempParentDir)
 
 	tempDir := filepath.Join(tempParentDir, "content")
 	var lastErr error
 	for _, source := range sources {
-		if err := os.RemoveAll(tempDir); err != nil {
+		if err := removePathAll(tempDir); err != nil {
 			return fmt.Errorf("reset temp skill directory: %w", err)
 		}
-		if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		if err := createDirAll(tempDir, 0o755); err != nil {
 			return fmt.Errorf("create temp skill directory: %w", err)
 		}
 		if err := s.downloadArchive(ctx, source, tempDir); err != nil {
@@ -184,7 +206,7 @@ func (s *Service) Sync(ctx context.Context, githubURL string, skillDirName strin
 	}
 
 	finalDir := filepath.Join(s.root, skillDirName)
-	if err := atomicReplaceDirectory(tempDir, finalDir); err != nil {
+	if err := publishDirectory(tempDir, finalDir); err != nil {
 		return fmt.Errorf("publish skill directory: %w", err)
 	}
 
@@ -197,7 +219,7 @@ func candidateGitHubSources(raw string) ([]GitHubSource, error) {
 		return nil, err
 	}
 
-	parsedURL, err := url.Parse(strings.TrimSpace(raw))
+	parsedURL, err := parseRawURL(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse githubUrl: %v", ErrInvalidGitHubURL, err)
 	}
@@ -208,10 +230,6 @@ func candidateGitHubSources(raw string) ([]GitHubSource, error) {
 	}
 
 	tail := segments[3:]
-	if len(tail) == 0 {
-		return []GitHubSource{source}, nil
-	}
-
 	if len(tail) == 1 && segments[2] == "tree" {
 		return []GitHubSource{source}, nil
 	}
@@ -225,14 +243,7 @@ func candidateGitHubSources(raw string) ([]GitHubSource, error) {
 			Ref:         strings.Join(tail[:split], "/"),
 			Subpath:     normalizeGitHubSubpath(tail[split:]),
 		}
-		if segments[2] == "blob" && candidate.Subpath == "" {
-			continue
-		}
 		candidates = append(candidates, candidate)
-	}
-
-	if len(candidates) == 0 {
-		return []GitHubSource{source}, nil
 	}
 
 	return candidates, nil
@@ -245,7 +256,7 @@ func (s *Service) ListResources(skillName string, skillDirName string) ([]mcp.MC
 		return nil, err
 	}
 	walkRoot := skillRoot
-	if resolvedRoot, err := filepath.EvalSymlinks(skillRoot); err == nil {
+	if resolvedRoot, err := evalSymlinksPath(skillRoot); err == nil {
 		walkRoot = resolvedRoot
 	}
 
@@ -273,7 +284,7 @@ func (s *Service) ListResources(skillName string, skillDirName string) ([]mcp.MC
 			return err
 		}
 
-		info, err := os.Stat(resolvedPath)
+		info, err := statPath(resolvedPath)
 		if err != nil {
 			return err
 		}
@@ -281,7 +292,7 @@ func (s *Service) ListResources(skillName string, skillDirName string) ([]mcp.MC
 			return nil
 		}
 
-		relativePath, err := filepath.Rel(walkRoot, currentPath)
+		relativePath, err := relPath(walkRoot, currentPath)
 		if err != nil {
 			return fmt.Errorf("resolve resource path: %w", err)
 		}
@@ -322,7 +333,7 @@ func (s *Service) ReadResource(skillName string, skillDirName string, resourceUR
 		return mcp.MCPResourceContent{}, fmt.Errorf("%w: skill name mismatch", ErrInvalidResourceURI)
 	}
 
-	targetPath, err := safeJoinUnderRoot(skillRoot, filepath.FromSlash(relativePath))
+	targetPath, err := joinUnderRootPath(skillRoot, filepath.FromSlash(relativePath))
 	if err != nil {
 		return mcp.MCPResourceContent{}, err
 	}
@@ -332,7 +343,7 @@ func (s *Service) ReadResource(skillName string, skillDirName string, resourceUR
 		return mcp.MCPResourceContent{}, err
 	}
 
-	payload, err := os.ReadFile(resolvedPath)
+	payload, err := readPathFile(resolvedPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return mcp.MCPResourceContent{}, ErrResourceNotFound
 	}
@@ -393,16 +404,12 @@ func ParseResourceURI(resourceURI string) (string, string, error) {
 
 	var relativeSegments []string
 	for _, segment := range segments[2:] {
-		unescaped, err := url.PathUnescape(segment)
+		unescaped, err := unescapePathSegment(segment)
 		if err != nil || unescaped == "" {
 			return "", "", fmt.Errorf("%w: invalid resource path", ErrInvalidResourceURI)
 		}
 		relativeSegments = append(relativeSegments, unescaped)
 	}
-	if len(relativeSegments) == 0 {
-		return "", "", fmt.Errorf("%w: missing resource path", ErrInvalidResourceURI)
-	}
-
 	relativePath := path.Clean(strings.Join(relativeSegments, "/"))
 	if relativePath == "." || strings.HasPrefix(relativePath, "../") || strings.HasPrefix(relativePath, "/") {
 		return "", "", fmt.Errorf("%w: invalid resource path", ErrInvalidResourceURI)
@@ -417,7 +424,7 @@ func (s *Service) downloadArchive(ctx context.Context, source GitHubSource, dest
 		downloadURL += "/" + url.PathEscape(source.Ref)
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	request, err := createRequest(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return fmt.Errorf("create github archive request: %w", err)
 	}
@@ -461,31 +468,31 @@ func (s *Service) downloadArchive(ctx context.Context, source GitHubSource, dest
 			continue
 		}
 
-		targetPath, err := safeJoinUnderRoot(destinationRoot, filepath.FromSlash(targetRelativePath))
+		targetPath, err := joinUnderRootPath(destinationRoot, filepath.FromSlash(targetRelativePath))
 		if err != nil {
 			return err
 		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, 0o755); err != nil {
+			if err := createDirAll(targetPath, 0o755); err != nil {
 				return fmt.Errorf("create extracted directory: %w", err)
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			if err := createDirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return fmt.Errorf("create extracted parent directory: %w", err)
 			}
 
-			file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+			file, err := openPathFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 			if err != nil {
 				return fmt.Errorf("create extracted file: %w", err)
 			}
 
 			if _, err := io.Copy(file, tarReader); err != nil {
-				file.Close()
+				_ = closePathFile(file)
 				return fmt.Errorf("copy extracted file: %w", err)
 			}
-			if err := file.Close(); err != nil {
+			if err := closePathFile(file); err != nil {
 				return fmt.Errorf("close extracted file: %w", err)
 			}
 			extracted = true
@@ -509,7 +516,7 @@ func (s *Service) skillRoot(skillDirName string) (string, error) {
 		return "", err
 	}
 
-	return safeJoinUnderRoot(s.root, skillDirName)
+	return joinUnderRootPath(s.root, skillDirName)
 }
 
 func ensureSkillDirName(skillDirName string) error {
@@ -577,7 +584,7 @@ func matchArchiveSubpath(archivePath string, subpath string) (string, bool) {
 }
 
 func safeJoinUnderRoot(root string, relativePath string) (string, error) {
-	cleanRoot, err := filepath.Abs(root)
+	cleanRoot, err := resolveAbsPath(root)
 	if err != nil {
 		return "", fmt.Errorf("resolve root path: %w", err)
 	}
@@ -596,7 +603,7 @@ func safeJoinUnderRoot(root string, relativePath string) (string, error) {
 }
 
 func resolveResourcePath(skillRoot string, currentPath string) (string, error) {
-	resolvedPath, err := filepath.EvalSymlinks(currentPath)
+	resolvedPath, err := evalSymlinksPath(currentPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", ErrResourceNotFound
@@ -604,7 +611,7 @@ func resolveResourcePath(skillRoot string, currentPath string) (string, error) {
 		return "", fmt.Errorf("resolve resource path: %w", err)
 	}
 	canonicalRoot := filepath.Clean(skillRoot)
-	if resolvedRoot, err := filepath.EvalSymlinks(skillRoot); err == nil {
+	if resolvedRoot, err := evalSymlinksPath(skillRoot); err == nil {
 		canonicalRoot = filepath.Clean(resolvedRoot)
 	}
 	if !isWithinRoot(canonicalRoot, resolvedPath) {
@@ -663,34 +670,34 @@ func isTextResource(mimeType string, payload []byte) bool {
 
 func atomicReplaceDirectory(tempDir string, finalDir string) error {
 	versionDir := finalDir + ".snapshot-" + time.Now().UTC().Format("20060102150405.000000000")
-	if err := os.Rename(tempDir, versionDir); err != nil {
+	if err := renamePath(tempDir, versionDir); err != nil {
 		return err
 	}
 
-	info, err := os.Lstat(finalDir)
+	info, err := lstatPath(finalDir)
 	if errors.Is(err, os.ErrNotExist) {
-		return os.Symlink(filepath.Base(versionDir), finalDir)
+		return createSymlink(filepath.Base(versionDir), finalDir)
 	}
 	if err != nil {
 		return err
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
-		previousVersionDir, err := linkedDirectoryTarget(finalDir)
+		previousVersionDir, err := resolveLinkedDir(finalDir)
 		if err != nil {
 			return err
 		}
 
 		nextLink := finalDir + ".next"
-		_ = os.Remove(nextLink)
-		if err := os.Symlink(filepath.Base(versionDir), nextLink); err != nil {
+		_ = removePathAll(nextLink)
+		if err := createSymlink(filepath.Base(versionDir), nextLink); err != nil {
 			return err
 		}
-		if err := os.Rename(nextLink, finalDir); err != nil {
+		if err := renamePath(nextLink, finalDir); err != nil {
 			return err
 		}
 		if previousVersionDir != "" {
-			if err := os.RemoveAll(previousVersionDir); err != nil {
+			if err := removePathAll(previousVersionDir); err != nil {
 				return err
 			}
 		}
@@ -698,15 +705,15 @@ func atomicReplaceDirectory(tempDir string, finalDir string) error {
 	}
 
 	backupDir := finalDir + ".backup"
-	_ = os.RemoveAll(backupDir)
-	if err := os.Rename(finalDir, backupDir); err != nil {
+	_ = removePathAll(backupDir)
+	if err := renamePath(finalDir, backupDir); err != nil {
 		return err
 	}
-	if err := os.Symlink(filepath.Base(versionDir), finalDir); err != nil {
-		_ = os.Rename(backupDir, finalDir)
+	if err := createSymlink(filepath.Base(versionDir), finalDir); err != nil {
+		_ = renamePath(backupDir, finalDir)
 		return err
 	}
-	if err := os.RemoveAll(backupDir); err != nil {
+	if err := removePathAll(backupDir); err != nil {
 		return err
 	}
 

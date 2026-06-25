@@ -56,7 +56,7 @@ type resourcesReadParams struct {
 	URI string `json:"uri"`
 }
 
-func handleBundleMCP(db *sql.DB, aggregator *mcp.SchemaAggregator, bundleStore *bundlepkg.Store, skillStorage skills.Storage, fallbackBundleName string) gin.HandlerFunc {
+func handleBundleMCP(db *sql.DB, aggregator toolAggregator, bundleStore bundleStoreAPI, skillStorage skills.Storage, fallbackBundleName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if aggregator == nil {
 			writeRPCResponse(c, http.StatusInternalServerError, nil, nil, &mcpRPCError{Code: -32603, Message: "mcp schema aggregator is unavailable"})
