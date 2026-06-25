@@ -1,0 +1,16 @@
+curl -X PUT http://127.0.0.1:8080/v1/mcp/bundles/website-ui \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer demo-admin-token' \
+  --data-binary '<payload omitted here; see session history>' 
+
+opencode mcp add siteui25-local --url http://127.0.0.1:8080/siteui25/mcp
+
+opencode mcp list
+
+cd opencode-real-test-workspace-3 && opencode run \
+  -m opencode/big-pickle \
+  --format json \
+  --dangerously-skip-permissions \
+  "请为一个 AI 技能聚合与分发平台做一个官网首页，面向开发者和 AI Agent 用户。页面需要包含 Hero、核心能力、使用流程、价格方案、FAQ 和页尾 CTA，整体风格现代、深色、科技感。不要直接调用现成页面生成工具；如果你当前能访问到资源列表，请先浏览并阅读最相关的内容，然后再自己在当前目录生成一个可以直接打开的单页 HTML 文件。"
+
+psql "$DATABASE_URL" -At -F $'\t' -c "SELECT occurred_at, tool_name, resource_path, success, http_status, COALESCE(client_user_agent, '') FROM skill_resource_read_events WHERE bundle_subdomain = 'siteui25' AND occurred_at >= TIMESTAMPTZ '2026-06-25 15:22:00+08' ORDER BY id ASC;"

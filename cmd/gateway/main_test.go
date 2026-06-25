@@ -374,6 +374,12 @@ func TestPathBasedBundleMCPReadsResource(t *testing.T) {
 		WithArgs("wx").
 		WillReturnRows(sqlmock.NewRows([]string{"tool_name", "skill_dir_name"}).
 			AddRow("current", "weather-current"))
+	mock.ExpectQuery(`(?s)SELECT b.bundle_name, COALESCE\(NULLIF\(TRIM\(b.subdomain\), ''\), b.bundle_name\)\s+FROM bundles b\s+JOIN bundle_skills bs.*`).
+		WithArgs("wx", "current").
+		WillReturnRows(sqlmock.NewRows([]string{"bundle_name", "subdomain"}).
+			AddRow("weather", "wx"))
+	mock.ExpectExec(`(?s)INSERT INTO skill_resource_read_events .*`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	router := newEngine(db, mcp.NewSchemaAggregator(db), bundlepkg.NewStore(db), stubSkillStorage{})
 	request := httptest.NewRequest(
@@ -649,6 +655,12 @@ func TestPathBasedBundleMCPReturnsResourceNotFound(t *testing.T) {
 		WithArgs("wx").
 		WillReturnRows(sqlmock.NewRows([]string{"tool_name", "skill_dir_name"}).
 			AddRow("current", "weather-current"))
+	mock.ExpectQuery(`(?s)SELECT b.bundle_name, COALESCE\(NULLIF\(TRIM\(b.subdomain\), ''\), b.bundle_name\)\s+FROM bundles b\s+JOIN bundle_skills bs.*`).
+		WithArgs("wx", "current").
+		WillReturnRows(sqlmock.NewRows([]string{"bundle_name", "subdomain"}).
+			AddRow("weather", "wx"))
+	mock.ExpectExec(`(?s)INSERT INTO skill_resource_read_events .*`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	router := newEngine(db, mcp.NewSchemaAggregator(db), bundlepkg.NewStore(db), errorSkillStorage{readErr: skills.ErrResourceNotFound})
 	request := httptest.NewRequest(http.MethodPost, "/wx/mcp", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"skillfun://skills/current/files/prompt.md"}}`))
@@ -1168,6 +1180,30 @@ func TestNewEngineBundleSkillsSuccess(t *testing.T) {
 	}
 }
 
+func TestNewEngineServesDemoPage(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	router := newEngine(db, &stubAggregator{}, &stubBundleStore{}, stubSkillStorage{})
+	for _, path := range []string{"/", "/demo"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want %d", path, recorder.Code, http.StatusOK)
+		}
+		if contentType := recorder.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+			t.Fatalf("GET %s Content-Type = %q, want text/html", path, contentType)
+		}
+		if body := recorder.Body.String(); !strings.Contains(body, "SkillFun MCP Demo") || !strings.Contains(body, "/v1/mcp/bundles") {
+			t.Fatalf("GET %s body missing demo UI markers: %s", path, body)
+		}
+	}
+}
+
 func TestHandleToolsListUsesFallbackBundleAndPermissionFailure(t *testing.T) {
 	aggregator := &stubAggregator{tools: []mcp.MCPTool{{Name: "weather.current"}}}
 	recorder := httptest.NewRecorder()
@@ -1330,6 +1366,16 @@ func TestEnsureSchemaExecutesAllStatements(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+func TestGatewaySchemaStatementsIncludeResourceReadAuditTable(t *testing.T) {
+	joinedStatements := strings.Join(gatewaySchemaStatements, "\n")
+	if !strings.Contains(joinedStatements, "CREATE TABLE IF NOT EXISTS skill_resource_read_events") {
+		t.Fatal("gateway schema statements do not include skill_resource_read_events table")
+	}
+	if !strings.Contains(joinedStatements, "skill_resource_read_events_bundle_time_idx") {
+		t.Fatal("gateway schema statements do not include resource read audit indexes")
 	}
 }
 

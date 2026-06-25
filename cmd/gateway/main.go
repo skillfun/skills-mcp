@@ -144,6 +144,34 @@ var gatewaySchemaStatements = []string{
 		END
 		$$`,
 	`CREATE INDEX IF NOT EXISTS payment_proofs_grant_lookup_idx ON payment_proofs(proof, grant_type, grant_target)`,
+	`CREATE TABLE IF NOT EXISTS skill_resource_read_events (
+			id BIGSERIAL PRIMARY KEY,
+			occurred_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			bundle_name TEXT NOT NULL,
+			bundle_subdomain TEXT NOT NULL,
+			tool_name TEXT NOT NULL,
+			skill_dir_name TEXT,
+			resource_uri TEXT NOT NULL,
+			resource_path TEXT NOT NULL,
+			mcp_method TEXT NOT NULL DEFAULT 'resources/read',
+			proof TEXT,
+			grant_type TEXT,
+			grant_target TEXT,
+			client_user_agent TEXT,
+			client_ip TEXT,
+			rpc_request_id TEXT,
+			success BOOLEAN NOT NULL,
+			http_status INTEGER NOT NULL,
+			rpc_error_code INTEGER,
+			error_message TEXT,
+			mime_type TEXT,
+			content_bytes BIGINT,
+			content_sha256 TEXT
+		)`,
+	`CREATE INDEX IF NOT EXISTS skill_resource_read_events_bundle_time_idx ON skill_resource_read_events (bundle_name, occurred_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS skill_resource_read_events_tool_time_idx ON skill_resource_read_events (tool_name, occurred_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS skill_resource_read_events_proof_time_idx ON skill_resource_read_events (proof, occurred_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS skill_resource_read_events_uri_time_idx ON skill_resource_read_events (resource_uri, occurred_at DESC)`,
 }
 
 type gatewayServer interface {
@@ -294,6 +322,9 @@ func newEngine(db *sql.DB, aggregator toolAggregator, bundleStore bundleStoreAPI
 			MaxAge:        12 * time.Hour,
 		}),
 	)
+
+	engine.GET("/", handleDemoPage())
+	engine.GET("/demo", handleDemoPage())
 
 	engine.GET("/v1/mcp/bundles", func(c *gin.Context) {
 		bundles, err := bundleStore.ListActiveBundles(c.Request.Context())

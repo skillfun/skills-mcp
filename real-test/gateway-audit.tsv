@@ -1,0 +1,6 @@
+occurred_at	tool_name	resource_path	success	http_status	client_user_agent
+2026-06-25 15:22:02.200981+08	web-design-engineer	README.md	t	200	opencode/1.17.10
+2026-06-25 15:22:02.311765+08	web-design-engineer	references/style-recipes/vercel-mesh.md	t	200	opencode/1.17.10
+2026-06-25 15:22:02.329895+08	web-design-engineer	references/style-recipes/linear.md	t	200	opencode/1.17.10
+2026-06-25 15:22:02.579625+08	web-design-engineer	references/style-recipes/raycast.md	t	200	opencode/1.17.10
+(4 rows)
