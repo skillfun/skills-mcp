@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	serverAddr          = ":8080"
+	serverAddr          = ":5080"
 	postgresPingTimeout = 5 * time.Second
 	shutdownTimeout     = 10 * time.Second
 )

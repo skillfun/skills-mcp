@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  gateway:
+    image: ${GATEWAY_IMAGE:?set GATEWAY_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      SKILL_STORAGE_ROOT: ${SKILL_STORAGE_ROOT:-/var/lib/skillfun/skills}
+      BUNDLE_ADMIN_TOKEN: ${BUNDLE_ADMIN_TOKEN:?set BUNDLE_ADMIN_TOKEN}
+      GIN_MODE: release
+    ports:
+      - "127.0.0.1:5080:5080"
+    volumes:
+      - skill_storage:${SKILL_STORAGE_ROOT:-/var/lib/skillfun/skills}
+
+volumes:
+  postgres_data:
+  skill_storage:

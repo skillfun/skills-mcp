@@ -1,0 +1,11 @@
+.DS_Store
+.git
+.github
+bin
+coverage.out
+cover.out
+docs
+gateway
+real-test
+*.coverprofile
+*.test

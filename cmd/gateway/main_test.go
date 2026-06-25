@@ -741,7 +741,7 @@ func TestParseBundleNameFromHost(t *testing.T) {
 		{host: "", want: ""},
 		{host: " wx.skillfun.ai ", want: "wx"},
 		{host: "wx.skillfun.ai", want: "wx"},
-		{host: "wx.skillfun.ai:8080", want: "wx"},
+		{host: "wx.skillfun.ai:5080", want: "wx"},
 		{host: "mcp.skillfun.ai", want: ""},
 		{host: "a.b.skillfun.ai", want: ""},
 		{host: "example.com", want: ""},
